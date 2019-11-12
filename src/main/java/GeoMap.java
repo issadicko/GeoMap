@@ -5,57 +5,112 @@ import org.geotools.feature.FeatureCollections;
 import org.geotools.feature.SchemaException;
 import org.geotools.feature.simple.SimpleFeatureBuilder;
 import org.geotools.feature.simple.SimpleFeatureTypeBuilder;
-import org.geotools.geometry.jts.GeometryBuilder;
+import org.geotools.geometry.DirectPosition2D;
+import org.geotools.geometry.Envelope2D;
 import org.geotools.geometry.jts.JTSFactoryFinder;
-import org.geotools.map.*;
+import org.geotools.map.FeatureLayer;
+import org.geotools.map.Layer;
+import org.geotools.map.MapContent;
 import org.geotools.referencing.crs.DefaultGeographicCRS;
 import org.geotools.styling.SLD;
 import org.geotools.styling.Style;
 import org.geotools.swing.JMapFrame;
+import org.geotools.swing.action.ZoomInAction;
 import org.geotools.swing.event.MapMouseEvent;
 import org.geotools.swing.event.MapMouseListener;
-import org.geotools.swing.tool.CursorTool;
+import org.geotools.swing.tool.ZoomInTool;
+import org.geotools.swing.tool.ZoomOutTool;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
-import org.locationtech.jts.geom.LinearRing;
-import org.locationtech.jts.io.ParseException;
-import org.locationtech.jts.io.WKTReader;
 import org.opengis.feature.simple.SimpleFeature;
 import org.opengis.feature.simple.SimpleFeatureType;
 
 import javax.swing.*;
-import javax.swing.event.ChangeEvent;
-import javax.swing.event.ChangeListener;
 import java.awt.*;
-import java.awt.Point;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.InputEvent;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 
 public class GeoMap extends JMapFrame{
 
-    private ArrayList<LPoint> liste;
+    private ArrayList<LPoint> bordure;
+    private ArrayList<LPoint> allPoints;
+    private Point panePos;
+
     private static int plugPlus = 0;
     private MapPointSelectionObserver observer;
 
-    public GeoMap(ArrayList<LPoint> liste){
+    private JButton zoomIn, zoomOut;
 
+    public GeoMap(ArrayList<LPoint> bordure){
         super(new MapContent());
+        allPoints = new ArrayList<>();
 
-        this.liste  = liste;
-        this.enableTool(Tool.POINTER, Tool.RESET, Tool.ZOOM, Tool.PAN);
+        allPoints.addAll(bordure);
+
+        this.bordure = bordure;
+        this.enableTool(Tool.RESET, Tool.SCROLLWHEEL, Tool.ZOOM, Tool.POINTER);
 
         this.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        this.setLayout(new BorderLayout());
 
-        this.setExtendedState(JFrame.MAXIMIZED_BOTH);
-        this.enableStatusBar(false);
-
-        addPoints(liste);
+        addPoints(bordure);
 
         setPaneCursor();
 
+        zoomIn = new JButton("+");
+        zoomOut = new JButton("-");
+        zoomIn.setFont(new Font("Serif", Font.PLAIN, 20));
+        zoomOut.setFont(new Font("Serif", Font.PLAIN, 20));
+
+        getMapPane().add(zoomOut);
+        getMapPane().add(zoomIn);
+
+        initZoomEvent();
+
         drawPolyGone();
+        this.setExtendedState(JFrame.MAXIMIZED_BOTH);
+
+    }
+
+    private void initZoomEvent() {
+        zoomIn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+
+                Rectangle paneArea = ((JComponent) getMapPane()).getVisibleRect();
+
+                double scale = getMapPane().getWorldToScreenTransform().getScaleX();
+                double newScale = scale * 1.5;
+
+                Envelope2D newMapArea = new Envelope2D();
+                newMapArea.setFrameFromCenter((getWidth()/10.), (getWidth()/10.) ,(getWidth()/2.) - 0.5d * paneArea.getWidth() / newScale,
+                         (getHeight()/2.) + 0.5d * paneArea.getHeight() / newScale);
+                getMapPane().setDisplayArea(newMapArea);
+
+            }
+        });
+
+        zoomOut.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                getMapPane().setCursorTool(new ZoomOutTool());
+
+                try {
+
+                    Robot robot = new Robot();
+                    robot.mouseMove((getMapPane().getWidth()/2), (int) (getHeight()/(1.8)));
+                    robot.mousePress(InputEvent.BUTTON3_DOWN_MASK);
+                    robot.mouseRelease(InputEvent.BUTTON3_DOWN_MASK);
+
+                } catch (AWTException e) {
+                    e.printStackTrace();
+                }
+
+            }
+        });
     }
 
     private void setPaneCursor(){
@@ -64,13 +119,19 @@ public class GeoMap extends JMapFrame{
             @Override
             public void onMouseClicked(MapMouseEvent ev) {
                 plugPlus = 0;
-                LPoint point = getPointIndex(ev.getWorldPos().getDirectPosition().getCoordinate(), liste);
+                LPoint point = getPointIndex(ev.getWorldPos().getDirectPosition().getCoordinate(), allPoints);
 
                 if (point != null && observer != null) observer.onPointSelected(point);
             }
 
             @Override
             public void onMouseDragged(MapMouseEvent ev) {
+
+                Point pos = ev.getPoint();
+                if (!pos.equals(panePos)) {
+                    getMapPane().moveImage(pos.x - panePos.x, pos.y - panePos.y);
+                    panePos = pos;
+                }
 
             }
 
@@ -91,7 +152,8 @@ public class GeoMap extends JMapFrame{
 
             @Override
             public void onMousePressed(MapMouseEvent ev) {
-
+                System.out.println(ev.getClickCount());
+                panePos = ev.getPoint();
             }
 
             @Override
@@ -162,7 +224,6 @@ public class GeoMap extends JMapFrame{
 
         }
 
-
         Style pointStyle = SLD.createPointStyle("circle", Color.BLACK, Color.BLACK,(float)1 ,(float) 10, "name", null);
         FeatureLayer layer = new FeatureLayer(collectionPoints, pointStyle);
 
@@ -170,6 +231,7 @@ public class GeoMap extends JMapFrame{
     }
 
     public void draw(ArrayList<LPoint> liste){
+        allPoints.addAll(liste);
         addPoints(liste);
     }
 
@@ -201,11 +263,11 @@ public class GeoMap extends JMapFrame{
         GeometryFactory factory = JTSFactoryFinder.getGeometryFactory();
         ArrayList<Coordinate> coords = new ArrayList<>();
 
-        for (LPoint p : liste){
+        for (LPoint p : bordure){
             coords.add(new Coordinate(p.getLatitude(), p.getLongitude()));
         }
 
-        Style style = SLD.createPolygonStyle(Color.BLACK, Color.CYAN, (float) 0.01);
+        Style style = SLD.createPolygonStyle(Color.BLACK, Color.CYAN, (float) 0.03);
 
         Geometry polygon = factory.createPolygon(coords.toArray(Coordinate[]::new));
 
